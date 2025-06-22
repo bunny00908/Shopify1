@@ -8,10 +8,10 @@ from playwright.sync_api import sync_playwright, TimeoutError
 from faker import Faker
 import requests
 
-TELEGRAM_TOKEN = '7495663085:AAH8Mr2aZK7DrS8DFHTxhKqN9uJU1DSNtd0'  # <-- Replace with your Telegram bot token!
+TELEGRAM_TOKEN = '7495663085:AAH8Mr2aZK7DrS8DFHTxhKqN9uJU1DSNtd0'  # <--- Replace with your bot token!
 USER_DATA_FILE = "user_data.json"
-PROXY_FILE = "proxy.txt"  # optional, put proxies here
-fake = Faker("en_US")     # always USA fake data
+PROXY_FILE = "proxy.txt"
+fake = Faker("en_US")  # USA address always
 
 WAIT_SITE, WAIT_CHECK = range(2)
 
@@ -118,7 +118,7 @@ def reset(update, context):
 
 def find_cheapest_and_fake(shop_url):
     try:
-        r = requests.get(f"{shop_url}/products.json", timeout=12)
+        r = requests.get(f"{shop_url}/products.json", timeout=20)
         if r.status_code != 200:
             return "Shopify /products.json not found or not public.", None, None
         products = r.json().get("products", [])
@@ -135,7 +135,6 @@ def find_cheapest_and_fake(shop_url):
                     }
         if not cheapest:
             return "No products found.", None, None
-        # USA-only fake shipping!
         fake_ship = {
             "name": fake.name(),
             "email": fake.email(),
@@ -174,11 +173,9 @@ def run_shopify_checkout(site, product, shipping, cc, mm, yyyy, cvc):
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(proxy=proxy_arg) if proxy_arg else browser.new_context()
             page = context.new_page()
-            # Add to cart
-            page.goto(f"{site}/cart/add?id={product['variant_id']}&quantity=1", timeout=20000)
-            # Checkout
-            page.goto(f"{site}/checkout", timeout=20000)
-            page.wait_for_selector('input[name="checkout[email]"]', timeout=20000)
+            page.goto(f"{site}/cart/add?id={product['variant_id']}&quantity=1", timeout=60000)
+            page.goto(f"{site}/checkout", timeout=60000)
+            page.wait_for_selector('input[name="checkout[email]"]', timeout=60000)
             page.fill('input[name="checkout[email]"]', shipping['email'])
             page.fill('input[name="checkout[shipping_address][first_name]"]', shipping['name'].split()[0])
             page.fill('input[name="checkout[shipping_address][last_name]"]', shipping['name'].split()[-1])
@@ -187,11 +184,10 @@ def run_shopify_checkout(site, product, shipping, cc, mm, yyyy, cvc):
             page.fill('input[name="checkout[shipping_address][zip]"]', shipping['zip'])
             page.fill('input[name="checkout[shipping_address][country]"]', shipping['country'])
             page.fill('input[name="checkout[shipping_address][phone]"]', shipping['phone'])
-            page.click('button[type="submit"]')  # Continue to shipping
-            page.wait_for_timeout(3000)
-            page.click('button[type="submit"]')  # Continue to payment
-            page.wait_for_timeout(4000)
-            # Try to get total: includes product + shipping + tax (in USD)
+            page.click('button[type="submit"]')
+            page.wait_for_timeout(5000)
+            page.click('button[type="submit"]')
+            page.wait_for_timeout(5000)
             try:
                 total_text = page.inner_text('.payment-due__price')
             except Exception:
@@ -203,13 +199,12 @@ def run_shopify_checkout(site, product, shipping, cc, mm, yyyy, cvc):
                 total_price = float(total_text.replace("$", "").replace(",", "").strip())
             except Exception:
                 total_price = product["price"]
-            page.wait_for_selector('iframe', timeout=20000)
+            page.wait_for_selector('iframe', timeout=30000)
             card_fields = {
                 "number": cc,
                 "expiry": f"{mm}/{yyyy[-2:]}",
                 "verification_value": cvc,
             }
-            # Fill Stripe/Shopify card fields in iframes
             filled = 0
             for frame in page.frames:
                 try:
@@ -228,8 +223,8 @@ def run_shopify_checkout(site, product, shipping, cc, mm, yyyy, cvc):
             if filled < 3:
                 browser.close()
                 return "DECLINED", "Could not fill all card fields (selectors may differ per shop).", total_price
-            page.click('button[type="submit"]')  # Click pay
-            page.wait_for_timeout(7000)
+            page.click('button[type="submit"]')
+            page.wait_for_timeout(9000)
             url = page.url
             content = page.content()
             browser.close()
